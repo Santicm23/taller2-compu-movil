@@ -1,11 +1,14 @@
 package com.example.taller2
 
+import android.content.DialogInterface
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.location.Geocoder
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
+import android.view.View
 
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.GoogleMap
@@ -15,6 +18,8 @@ import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.MarkerOptions
 import com.example.taller2.databinding.ActivityMapBinding
 import com.google.android.gms.maps.model.MapStyleOptions
+import com.google.android.gms.maps.model.PolylineOptions
+import java.io.IOException
 
 class MapActivity : AppCompatActivity(), OnMapReadyCallback {
 
@@ -23,6 +28,9 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
     private lateinit var sensorManager: SensorManager
     private lateinit var lightSensor: Sensor
     private var lightSensorListener: SensorEventListener? = null
+    // Initialize the geocoder
+    private lateinit var mGeocoder: Geocoder
+    private var polyline: PolylineOptions? = null
 
     private var light: Boolean = true
 
@@ -91,6 +99,50 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
             lightSensor,
             SensorManager.SENSOR_DELAY_NORMAL
         )
+
+        mGeocoder = Geocoder(this)
+
+        mMap.setOnMapLongClickListener { latLng ->
+            // Crea un marcador en la posición del evento
+            val marker = MarkerOptions().position(latLng)
+
+            // Obtiene la dirección usando Geocoder
+            try {
+                val addresses = mGeocoder.getFromLocation(latLng.latitude, latLng.longitude, 1)
+                if (addresses?.isNotEmpty() == true) {
+                    val address = addresses[0]
+                    marker.title(address.getAddressLine(0))
+                }
+            } catch (e: IOException) {
+                e.printStackTrace()
+            }
+
+            googleMap.addMarker(marker)
+        }
+
+        binding.editTextText.setOnKeyListener { v, keyCode, event ->
+            if (keyCode == 66) {
+                val addressString = binding.editTextText.text.toString()
+                if (addressString.isNotEmpty()) {
+                    try {
+                        val addresses = mGeocoder.getFromLocationName(addressString, 2)
+                        if (addresses != null && !addresses.isEmpty()) {
+                            val addressResult = addresses[0]
+                            val position = LatLng(addressResult.latitude, addressResult.longitude)
+                            mMap.addMarker(
+                                MarkerOptions().position(position)
+                                    .title(addressResult.featureName)
+                                    .snippet(addressResult.getAddressLine(0))
+                            )
+                            mMap.moveCamera(CameraUpdateFactory.newLatLng(position))
+                        }
+                    } catch (e: IOException) {
+                        e.printStackTrace()
+                    }
+                }
+            }
+            false
+        }
     }
 
     override fun onResume() {
@@ -112,4 +164,33 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
             sensorManager.unregisterListener(lightSensorListener)
         }
     }
+
+    /*private fun findAddress() {
+        val addressString = mAddress.text.toString()
+        if (addressString.isNotEmpty()) {
+            try {
+                val addresses = mGeocoder.getFromLocationName(addressString, 2,
+                    lowerLeftLatitude, lowerLeftLongitude,
+                    upperRightLatitude, upperRightLongitude
+                )
+                if (addresses != null && !addresses.isEmpty()) {
+                    val addressResult = addresses[0]
+                    val position = LatLng(addressResult.latitude, addressResult.longitude)
+                    mMap.addMarker(
+                        MarkerOptions().position(position)
+                            .title(addressResult.featureName)
+                            .snippet(addressResult.getAddressLine(0))
+                            .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE))
+                    )
+                    mMap.moveCamera(CameraUpdateFactory.newLatLng(position))
+                } else {
+                    Toast.makeText(this, "Dirección no encontrada", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: IOException) {
+                e.printStackTrace()
+            }
+        } else {
+            Toast.makeText(this, "La dirección está vacía", Toast.LENGTH_SHORT).show()
+        }
+    }*/
 }
