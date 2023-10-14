@@ -1,6 +1,8 @@
 package com.example.taller2
 
 import android.Manifest
+import android.content.Intent
+import android.content.IntentSender
 import android.content.pm.PackageManager
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -9,16 +11,27 @@ import android.hardware.SensorManager
 import android.location.Geocoder
 import android.location.Location
 import android.os.Bundle
+import android.os.Looper
 import android.util.Log
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.example.taller2.databinding.ActivityMapBinding
+import com.google.android.gms.common.api.ApiException
+import com.google.android.gms.common.api.CommonStatusCodes
+import com.google.android.gms.common.api.ResolvableApiException
 import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.Granularity
 import com.google.android.gms.location.LocationCallback
+import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.LocationSettingsRequest
+import com.google.android.gms.location.LocationSettingsResponse
+import com.google.android.gms.location.LocationSettingsStatusCodes
+import com.google.android.gms.location.LocationSettingsStatusCodes.*
+import com.google.android.gms.location.Priority
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.GoogleMap
 import com.google.android.gms.maps.GoogleMap.OnMyLocationButtonClickListener
@@ -31,7 +44,7 @@ import com.google.android.gms.maps.model.MarkerOptions
 import com.google.android.gms.maps.model.PolylineOptions
 import java.io.IOException
 
-class MapActivity : AppCompatActivity(), OnMapReadyCallback, OnMyLocationButtonClickListener, OnLocationChangedListener {
+class MapActivity : AppCompatActivity(), OnMapReadyCallback {
 
     private lateinit var mMap: GoogleMap
     private lateinit var binding: ActivityMapBinding
@@ -41,12 +54,16 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback, OnMyLocationButtonC
     // Initialize the geocoder
     private lateinit var mGeocoder: Geocoder
     private lateinit var polyline: PolylineOptions
-    private var mFusedLocationClient: FusedLocationProviderClient? = null
 
     private var light: Boolean = true
 
+    private var mFusedLocationClient: FusedLocationProviderClient? = null
+    private var mLocationRequest: LocationRequest? = null
+    private var mLocationCallback:  LocationCallback? = null
+
     companion object {
         private const val LOCATION_PERMISSION_REQUEST_CODE = 0
+        const val REQUEST_CHECK_SETTINGS = 201
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -135,7 +152,7 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback, OnMyLocationButtonC
             googleMap.addMarker(marker)
         }
 
-        binding.editTextText.setOnKeyListener { v, keyCode, event ->
+        binding.editTextText.setOnKeyListener { _, keyCode, _ ->
             if (keyCode == 66) {
                 val addressString = binding.editTextText.text.toString()
                 if (addressString.isNotEmpty()) {
@@ -159,9 +176,10 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback, OnMyLocationButtonC
             false
         }
 
-        binding.switch1.setOnCheckedChangeListener { buttonView, isChecked ->
+        binding.switch1.setOnCheckedChangeListener { _, isChecked ->
             if (isChecked) {
                 enableLocation()
+                onLocationActivated()
             } else {
                 if (ContextCompat.checkSelfPermission(
                         this,
@@ -171,7 +189,6 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback, OnMyLocationButtonC
                 }
             }
         }
-        mFusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
     }
 
     override fun onResume() {
@@ -183,6 +200,8 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback, OnMyLocationButtonC
             lightSensor,
             SensorManager.SENSOR_DELAY_NORMAL
         )
+
+        startLocationUpdates()
     }
 
     override fun onPause() {
@@ -190,6 +209,25 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback, OnMyLocationButtonC
         if (!::lightSensorListener.isInitialized) return
 
         sensorManager.unregisterListener(lightSensorListener)
+
+        stopLocationUpdates()
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        when (requestCode) {
+            REQUEST_CHECK_SETTINGS -> {
+                if (resultCode == RESULT_OK) {
+                    startLocationUpdates()
+                } else {
+                    Toast.makeText(
+                        this,
+                        "Sin acceso a localización. Hardware deshabilitado",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }
     }
 
     private fun enableLocation() {
@@ -199,8 +237,6 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback, OnMyLocationButtonC
                 Manifest.permission.ACCESS_FINE_LOCATION
             ) == PackageManager.PERMISSION_GRANTED) {
             mMap.isMyLocationEnabled = true
-            polyline = PolylineOptions()
-            mMap.addPolyline(polyline)
         } else {
             requestLocationPermission()
         }
@@ -271,13 +307,74 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback, OnMyLocationButtonC
         }
     }
 
-    override fun onMyLocationButtonClick(): Boolean {
-        Toast.makeText(this, "Ubicación actual", Toast.LENGTH_SHORT).show()
-        return false
+    private fun onLocationActivated() {
+        Log.i("Location", "Location Activated")
+        polyline = PolylineOptions()
+        mLocationRequest = createLocationRequest()
+        mFusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+        mLocationCallback = object : LocationCallback() {
+            override fun onLocationResult(locationResult: LocationResult) {
+                val location = locationResult.lastLocation
+                Log.i("Location", "Location update in the callback: $location")
+
+                if (location != null) {
+                    val position = LatLng(location.latitude, location.longitude)
+                    mMap.moveCamera(CameraUpdateFactory.newLatLng(position))
+                    //
+                    // mMap.animateCamera(CameraUpdateFactory.zoomTo(15F))
+                    polyline.add(position)
+                    mMap.addPolyline(polyline)
+                }
+            }
+        }
+        turnOnLocationAndStartUpdates()
     }
-    override fun onLocationChanged(p0: Location) {
-        polyline.add(LatLng(p0.latitude, p0.longitude))
-        mMap.addPolyline(polyline)
-        Log.i("Location", "Location changed")
+
+    private fun createLocationRequest(): LocationRequest {
+        return LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 10000).apply {
+            setMinUpdateDistanceMeters(5F)
+            setGranularity(Granularity.GRANULARITY_PERMISSION_LEVEL)
+            setWaitForAccurateLocation(true)
+        }.build()
+    }
+    private fun startLocationUpdates() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+            mFusedLocationClient!!.requestLocationUpdates(mLocationRequest!!, mLocationCallback!!, Looper.getMainLooper())
+        }
+    }
+
+    private fun stopLocationUpdates() {
+        mFusedLocationClient!!.removeLocationUpdates(mLocationCallback!!)
+    }
+
+    private fun turnOnLocationAndStartUpdates() {
+        val builder = LocationSettingsRequest.Builder().addLocationRequest(
+            mLocationRequest!!
+        )
+        val client = LocationServices.getSettingsClient(this)
+        val task = client.checkLocationSettings(builder.build())
+        task.addOnSuccessListener(
+            this
+        ) { locationSettingsResponse: LocationSettingsResponse? ->
+            startLocationUpdates() // Todas las condiciones para recibiir localizaciones
+        }
+        task.addOnFailureListener(this) { e ->
+            val statusCode = (e as ApiException).statusCode
+            when (statusCode) {
+                CommonStatusCodes.RESOLUTION_REQUIRED ->                         // Location setttings are not satisfied, but this can be fixed by showing the user a dialog.
+                    try {
+                        // Show the dialog by calling startResolutionForResult(), and check the result in onActivityResult()
+                        val resolvable = e as ResolvableApiException
+                        resolvable.startResolutionForResult(
+                            this@MapActivity,
+                            REQUEST_CHECK_SETTINGS
+                        )
+                    } catch (sendEx: IntentSender.SendIntentException) {
+                        // Ignore the error
+                    }
+
+                SETTINGS_CHANGE_UNAVAILABLE -> {}
+            }
+        }
     }
 }
