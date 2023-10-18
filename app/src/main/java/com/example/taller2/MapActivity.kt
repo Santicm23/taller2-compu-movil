@@ -99,7 +99,7 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
         // Initialize the listener
         lightSensorListener = object : SensorEventListener {
             override fun onSensorChanged(event: SensorEvent) {
-                if (event.values[0] < 4000 && light) {
+                if (event.values[0] < 500 && light) {
                     light = false
                     mMap.setMapStyle(
                         MapStyleOptions.loadRawResourceStyle(
@@ -107,7 +107,7 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
                             R.raw.style_night
                         )
                     )
-                } else if (event.values[0] > 5000 && !light) {
+                } else if (event.values[0] > 2000 && !light) {
                     light = true
                     mMap.setMapStyle(
                         MapStyleOptions.loadRawResourceStyle(
@@ -320,8 +320,8 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
                 if (location != null) {
                     val position = LatLng(location.latitude, location.longitude)
                     mMap.moveCamera(CameraUpdateFactory.newLatLng(position))
-                    //
-                    // mMap.animateCamera(CameraUpdateFactory.zoomTo(15F))
+                    mMap.animateCamera(CameraUpdateFactory.zoomTo(15F))
+                    mMap.addMarker(MarkerOptions().position(position))
                     polyline.add(position)
                     mMap.addPolyline(polyline)
                 }
